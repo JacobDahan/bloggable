@@ -2,7 +2,7 @@
 
 > An open source CLI tool to generate blog posts from git commits in a particular voice using LLMs
 
-Transform your git commits into engaging content with one command. Bloggable analyzes your code changes, intelligently gathers context, and generates posts in different voices - from technical deep-dives to Twitter threads to release notes.
+Transform git commits into engaging content with one command. Bloggable analyzes your code changes, intelligently gathers context, and generates posts in different voices - from technical deep-dives to Twitter threads to release notes.
 
 ## ✨ Features
 
@@ -33,13 +33,13 @@ cargo build --release
 
 ```bash
 # Generate a technical blog post from recent commits
-bloggable --commits HEAD~3..HEAD --voice technical --medium blog
+bloggable generate --commits HEAD~3..HEAD --voice technical --medium blog
 
 # Create a playful Twitter thread about a specific feature
-bloggable --commits abc123f --voice playful --medium twitter-thread --intent "announce new user authentication system"
+bloggable generate --commits abc123f --voice playful --medium twitter-thread --intent "announce new user authentication system"
 
 # Generate release notes
-bloggable --commits v1.0.0..HEAD --voice concise --medium release-notes
+bloggable generate --commits v1.0.0..HEAD --voice concise --medium release-notes
 ```
 
 ### Configuration
@@ -53,9 +53,13 @@ openai = "your-openai-api-key"
 [defaults]
 voice = "educational"
 medium = "blog"
+output = "json"
 max_turns = 5
 context_limit = 8000
 ```
+
+> [!TIP]
+> You can now use `bloggable init` to easily create your `toml` config!
 
 ## 📖 How It Works
 
@@ -78,7 +82,8 @@ context_limit = 8000
 
 ### Technical Deep-Dive
 ```bash
-bloggable --commits HEAD~1..HEAD \
+bloggable generate \
+  --commits HEAD~1..HEAD \
   --voice technical \
   --medium blog \
   --intent "explain the algorithm choice and performance implications"
@@ -93,7 +98,7 @@ bloggable --commits HEAD~1..HEAD \
 
 ### Twitter Thread
 ```bash
-bloggable --commits feature/auth --voice concise --medium twitter-thread
+bloggable generate --commits feature/auth --voice concise --medium twitter-thread
 ```
 
 **Output Preview**:
@@ -114,7 +119,7 @@ bloggable --commits feature/auth --voice concise --medium twitter-thread
 - `--format <FORMAT>`: Output format (`markdown`, `plain`, `json`)
 
 ### Context Control
-- `--show-context`: Show prioritized context for the commit range
+- `--dry-run`: Show prioritized context for the commit range without sending to the LLM
 - `--max-turns <N>`: Limit multi-turn conversation rounds
 - `--context-limit <TOKENS>`: Maximum context size
 
