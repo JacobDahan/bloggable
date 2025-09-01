@@ -40,6 +40,8 @@ pub enum Command {
         // TODO: Add option for setting max turns for generation
         // TODO: Add option for setting max tokens for context size
         // TODO: Add option for setting API key, provider for this run
+        // TODO: Add option for setting repository path (default to current directory)
+        // TODO: Add option for setting repository type (local, GitHub, GitLab, etc.)
     },
     /// Initialize configuration file
     Init {
@@ -47,14 +49,19 @@ pub enum Command {
         // TODO: Add option for setting max turns for generation in config
         // TODO: Add option for setting max tokens for context size in config
         // TODO: Add option for setting API key, provider for config
+        // TODO: Add option for setting default repository path in config
+        // TODO: Add option for setting default repository type in config
     },
-    /// List available voices and mediums
+    /// List available voices, mediums, and formats
     List {
         /// List voices
-        #[arg(long)]
+        #[arg(long, action = clap::ArgAction::SetTrue)]
         voices: bool,
         /// List mediums
-        #[arg(long)]
+        #[arg(long, action = clap::ArgAction::SetTrue)]
         mediums: bool,
+        /// List formats
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        formats: bool,
     },
 }
