@@ -318,7 +318,11 @@ impl CommitParser {
     pub async fn generate_diffs(&self, commit_spec: CommitSpec) -> ParseResult<Vec<Diff>> {
         let commit_infos = match commit_spec {
             CommitSpec::Single(commit_info) => vec![commit_info],
-            CommitSpec::Multiple(commit_infos) => commit_infos,
+            CommitSpec::Multiple(mut commit_infos) => {
+                // Sort commits chronologically (oldest first)
+                commit_infos.sort();
+                commit_infos
+            }
             CommitSpec::Range { from, to } => {
                 let repository = self.repository.read().await;
                 repository.walk_range(&from, &to).await.map_err(|e| {

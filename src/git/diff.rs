@@ -223,7 +223,7 @@ impl Diff {
     /// use bloggable::git::diff::{Diff, FileDiff, FileStatus, DiffStats};
     /// use bloggable::git::commit::CommitInfo;
     ///
-    /// let commit_info = CommitInfo::new("abc123".to_string(), "Test commit".to_string());
+    /// let commit_info = CommitInfo::new("abc123".to_string(), "Test commit".to_string(), 1000);
     /// let diff = Diff::new(
     ///     commit_info,
     ///     vec![
@@ -260,7 +260,7 @@ impl Diff {
     /// use bloggable::git::diff::{Diff, FileDiff, FileStatus, DiffStats};
     /// use bloggable::git::commit::CommitInfo;
     ///
-    /// let commit_info = CommitInfo::new("def456".to_string(), "Delete files".to_string());
+    /// let commit_info = CommitInfo::new("def456".to_string(), "Delete files".to_string(), 2000);
     /// let diff = Diff::new(
     ///     commit_info,
     ///     vec![
@@ -299,7 +299,7 @@ impl Diff {
     /// use bloggable::git::diff::{Diff, FileDiff, FileStatus, DiffStats};
     /// use bloggable::git::commit::CommitInfo;
     ///
-    /// let commit_info = CommitInfo::new("ghi789".to_string(), "Modify files".to_string());
+    /// let commit_info = CommitInfo::new("ghi789".to_string(), "Modify files".to_string(), 3000);
     /// let diff = Diff::new(
     ///     commit_info,
     ///     vec![
@@ -819,7 +819,7 @@ mod tests {
         let git_diff = repo
             .diff_tree_to_tree(Some(&tree), Some(&tree), None)
             .unwrap();
-        let commit_info = CommitInfo::new("test123".to_string(), "Test commit".to_string());
+        let commit_info = CommitInfo::new("test123".to_string(), "Test commit".to_string(), 1000);
         let diff = Diff::from_git_diff(commit_info, git_diff).expect("Should handle empty diff");
 
         assert_eq!(diff.files().len(), 0);

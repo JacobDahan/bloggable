@@ -163,6 +163,7 @@ impl TestRepo {
         let commit_info = CommitInfo::new(
             self.second_commit_id.to_string(),
             commit2.message().unwrap_or("").to_string(),
+            commit2.time().seconds(),
         );
 
         Diff::from_git_diff(commit_info, git_diff).expect("Failed to convert git2::Diff to Diff")

@@ -762,6 +762,7 @@ mod tests {
         let second_commit = CommitInfo::new(
             test_repo.second_commit_id(),
             "Second commit with changes".to_string(),
+            2000,
         );
 
         // Generate the diff of the second commit
@@ -800,7 +801,7 @@ mod tests {
         let test_repo = TestRepo::new().await;
 
         let first_commit =
-            CommitInfo::new(test_repo.first_commit_id(), "Initial commit".to_string());
+            CommitInfo::new(test_repo.first_commit_id(), "Initial commit".to_string(), 1000);
 
         // The first commit should have a diff against empty tree
         let diff = test_repo.repo.generate_diff(&first_commit).await.unwrap();

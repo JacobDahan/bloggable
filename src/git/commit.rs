@@ -7,16 +7,17 @@ pub enum CommitError {
 }
 
 /// Metadata about a Git commit.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitInfo {
     id: String,
     message: String,
+    timestamp: i64,
 }
 
 impl CommitInfo {
     /// Create a new CommitInfo instance.
-    pub fn new(id: String, message: String) -> Self {
-        CommitInfo { id, message }
+    pub fn new(id: String, message: String, timestamp: i64) -> Self {
+        CommitInfo { id, message, timestamp }
     }
 
     /// Get the commit ID.
@@ -27,6 +28,24 @@ impl CommitInfo {
     /// Get the commit message.
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    /// Get the commit timestamp (Unix timestamp in seconds).
+    pub fn timestamp(&self) -> i64 {
+        self.timestamp
+    }
+}
+
+impl PartialOrd for CommitInfo {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for CommitInfo {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Sort by timestamp (chronological order)
+        self.timestamp.cmp(&other.timestamp)
     }
 }
 
@@ -68,8 +87,9 @@ impl TryFrom<git2::Commit<'_>> for CommitInfo {
             .message()
             .ok_or(CommitError::Git2ConversionError)?
             .to_string();
+        let timestamp = commit.time().seconds();
 
-        Ok(CommitInfo { id, message })
+        Ok(CommitInfo { id, message, timestamp })
     }
 }
 
@@ -87,4 +107,33 @@ pub enum CommitSpec {
     /// A range of commits from one point to another (e.g., "A..B")
     /// The actual commits in the range are computed lazily during diff generation
     Range { from: CommitInfo, to: CommitInfo },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_commit_info_chronological_ordering() {
+        let older_commit = CommitInfo::new(
+            "abc123".to_string(),
+            "Older commit".to_string(),
+            1000,
+        );
+        let newer_commit = CommitInfo::new(
+            "def456".to_string(),
+            "Newer commit".to_string(),
+            2000,
+        );
+
+        // Test ordering
+        assert!(older_commit < newer_commit);
+        assert!(newer_commit > older_commit);
+
+        // Test sorting
+        let mut commits = vec![newer_commit.clone(), older_commit.clone()];
+        commits.sort();
+        assert_eq!(commits[0], older_commit);
+        assert_eq!(commits[1], newer_commit);
+    }
 }
