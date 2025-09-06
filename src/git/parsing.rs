@@ -318,11 +318,7 @@ impl CommitParser {
     pub async fn generate_diffs(&self, commit_spec: CommitSpec) -> ParseResult<Vec<Diff>> {
         let commit_infos = match commit_spec {
             CommitSpec::Single(commit_info) => vec![commit_info],
-            CommitSpec::Multiple(mut commit_infos) => {
-                // Sort commits chronologically (oldest first)
-                commit_infos.sort();
-                commit_infos
-            }
+            CommitSpec::Multiple(commit_infos) => commit_infos,
             CommitSpec::Range { from, to } => {
                 let repository = self.repository.read().await;
                 repository.walk_range(&from, &to).await.map_err(|e| {
@@ -435,10 +431,12 @@ impl CommitParser {
     /// This will resolve the commit-ish references to commit info objects,
     /// if valid commits are found. Otherwise, an error is returned.
     /// The input can be any valid Git references (branch names, tags, OIDs, etc.).
+    /// Note: The resulting commits will be sorted in chronological order (oldest to newest).
     async fn parse_multi(&self, commits: &str) -> ParseResult<CommitSpec> {
         let commit_ids: Vec<&str> = commits.split_whitespace().collect();
-        let resolved_commit_infos = self.resolve_commit_infos(commit_ids).await?;
+        let mut resolved_commit_infos = self.resolve_commit_infos(commit_ids).await?;
 
+        resolved_commit_infos.sort();
         Ok(CommitSpec::Multiple(resolved_commit_infos))
     }
 
@@ -723,8 +721,8 @@ mod tests {
             CommitSpec::Multiple(commits) => {
                 assert_eq!(commits.len(), 3);
                 assert_eq!(commits[0].id(), test_repo.first_commit_id()); // HEAD~1
-                assert_eq!(commits[1].id(), test_repo.second_commit_id()); // HEAD
-                assert_eq!(commits[2].id(), test_repo.first_commit_id()); // explicit hash
+                assert_eq!(commits[1].id(), test_repo.first_commit_id()); // explicit hash
+                assert_eq!(commits[2].id(), test_repo.second_commit_id()); // HEAD
             }
             _ => panic!("Expected Multiple commit spec"),
         }
@@ -762,6 +760,28 @@ mod tests {
                 assert_eq!(commits.len(), 2);
                 assert_eq!(commits[0].id(), test_repo.first_commit_id()); // explicit hash
                 assert_eq!(commits[1].id(), test_repo.second_commit_id()); // v2.0
+            }
+            _ => panic!("Expected Multiple commit spec"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_parse_multiple_commits_out_of_order() {
+        let (test_repo, parser) = setup_parser().await;
+
+        let multi = format!(
+            "{} {}",
+            test_repo.second_commit_id(),
+            test_repo.first_commit_id()
+        );
+        let spec = parser.parse_commits(&multi).await.unwrap();
+
+        match spec {
+            CommitSpec::Multiple(commits) => {
+                assert_eq!(commits.len(), 2);
+                // Commits should be sorted chronologically
+                assert_eq!(commits[0].id(), test_repo.first_commit_id());
+                assert_eq!(commits[1].id(), test_repo.second_commit_id());
             }
             _ => panic!("Expected Multiple commit spec"),
         }

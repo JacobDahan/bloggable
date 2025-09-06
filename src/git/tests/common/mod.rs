@@ -1,3 +1,4 @@
+use git2::Time;
 use std::fs;
 use tempfile::TempDir;
 
@@ -36,7 +37,9 @@ impl TestRepo {
     pub async fn new() -> Self {
         let temp_dir = TempDir::new().unwrap();
         let git_repo = git2::Repository::init(temp_dir.path()).unwrap();
-        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        let mut time = Time::new(1000, 0);
+        let sig = git2::Signature::new("Test", "test@example.com", &time).unwrap();
 
         // Get the path to test data files (src/git/tests/data/)
         let test_data_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -97,6 +100,12 @@ impl TestRepo {
         fs::remove_file(temp_dir.path().join("old_module.rs")).unwrap();
         // 3. Add new_feature.rs
         fs::write(temp_dir.path().join("new_feature.rs"), &new_feature_content).unwrap();
+
+        // Update time for the second commit
+        time = Time::new(time.seconds() + 1, time.offset_minutes());
+
+        // Create new signature with updated time
+        let sig = git2::Signature::new("Test", "test@example.com", &time).unwrap();
 
         index.add_path(std::path::Path::new("main.rs")).unwrap();
         index
