@@ -186,7 +186,7 @@ cargo test --features mock-llm
 - [ ] Multi-turn context gathering
 - [ ] Basic voice system
 - [ ] Repository analysis
-- [ ] Git integration
+- [X] Git integration
 
 ### v1.1 - Enhanced Voices
 - [ ] More pre-built voices (changelog, technical-beginner, social-medium)

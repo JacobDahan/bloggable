@@ -1,5 +1,7 @@
-use std::sync::LazyLock;
+use std::{path::PathBuf, sync::LazyLock};
 use tracing::warn;
+
+use crate::git::commit::CommitInfo;
 
 static HUNK_HEADER_REGEX: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"@@ -\d+,\d+ \+\d+,\d+ @@(.*)").unwrap());
@@ -28,30 +30,110 @@ pub enum LineType {
 /// A single line within a diff hunk
 #[derive(Debug, Clone)]
 pub struct DiffLine {
-    pub line_type: LineType,
-    pub content: String,
-    pub old_line_number: Option<u32>,
-    pub new_line_number: Option<u32>,
+    line_type: LineType,
+    content: String,
+    old_line_number: Option<u32>,
+    new_line_number: Option<u32>,
+}
+
+impl DiffLine {
+    pub fn line_type(&self) -> &LineType {
+        &self.line_type
+    }
+
+    pub fn content(&self) -> &str {
+        &self.content
+    }
+
+    pub fn old_line_number(&self) -> Option<u32> {
+        self.old_line_number
+    }
+
+    pub fn new_line_number(&self) -> Option<u32> {
+        self.new_line_number
+    }
 }
 
 /// A contiguous block of changes within a file
 #[derive(Debug, Clone)]
 pub struct DiffHunk {
-    pub old_start: u32,
-    pub old_lines: u32,
-    pub new_start: u32,
-    pub new_lines: u32,
-    pub header: String,
-    pub lines: Vec<DiffLine>,
+    old_start: u32,
+    old_lines: u32,
+    new_start: u32,
+    new_lines: u32,
+    header: String,
+    lines: Vec<DiffLine>,
+}
+
+impl DiffHunk {
+    pub fn old_start(&self) -> u32 {
+        self.old_start
+    }
+
+    pub fn old_lines(&self) -> u32 {
+        self.old_lines
+    }
+
+    pub fn new_start(&self) -> u32 {
+        self.new_start
+    }
+
+    pub fn new_lines(&self) -> u32 {
+        self.new_lines
+    }
+
+    pub fn header(&self) -> &str {
+        &self.header
+    }
+
+    pub fn lines(&self) -> &[DiffLine] {
+        &self.lines
+    }
 }
 
 /// Changes to a single file in the diff
 #[derive(Debug, Clone)]
 pub struct FileDiff {
-    pub old_path: Option<String>,
-    pub new_path: Option<String>,
-    pub status: FileStatus,
-    pub hunks: Vec<DiffHunk>,
+    old_path: Option<PathBuf>,
+    new_path: Option<PathBuf>,
+    status: FileStatus,
+    hunks: Vec<DiffHunk>,
+}
+
+impl FileDiff {
+    pub fn old_path(&self) -> Option<&PathBuf> {
+        self.old_path.as_ref()
+    }
+
+    pub fn new_path(&self) -> Option<&PathBuf> {
+        self.new_path.as_ref()
+    }
+
+    pub fn status(&self) -> &FileStatus {
+        &self.status
+    }
+
+    pub fn hunks(&self) -> &[DiffHunk] {
+        &self.hunks
+    }
+
+    /// Create a new FileDiff for testing purposes
+    ///
+    /// This method is intended for internal testing and documentation examples only.
+    #[doc(hidden)]
+    pub fn new(
+        old_path: Option<PathBuf>,
+        new_path: Option<PathBuf>,
+        status: FileStatus,
+        hunks: Vec<DiffHunk>,
+    ) -> Self {
+        Self {
+            old_path,
+            new_path,
+            status,
+            hunks,
+        }
+    }
 }
 
 /// The type of change applied to a file
@@ -70,56 +152,103 @@ pub enum FileStatus {
 }
 
 /// A structured representation of a Git diff
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Diff {
-    pub files: Vec<FileDiff>,
-    pub stats: DiffStats,
+    commit_info: CommitInfo,
+    files: Vec<FileDiff>,
+    stats: DiffStats,
 }
 
 /// Statistics about the changes in a diff
 #[derive(Debug, Clone, Default)]
 pub struct DiffStats {
-    pub files_changed: usize,
-    pub insertions: usize,
-    pub deletions: usize,
+    files_changed: usize,
+    insertions: usize,
+    deletions: usize,
+}
+
+impl DiffStats {
+    pub fn files_changed(&self) -> usize {
+        self.files_changed
+    }
+
+    pub fn insertions(&self) -> usize {
+        self.insertions
+    }
+
+    pub fn deletions(&self) -> usize {
+        self.deletions
+    }
+
+    /// Create a new DiffStats for testing purposes
+    ///
+    /// This method is intended for internal testing and documentation examples only.
+    #[doc(hidden)]
+    pub fn new(files_changed: usize, insertions: usize, deletions: usize) -> Self {
+        Self {
+            files_changed,
+            insertions,
+            deletions,
+        }
+    }
 }
 
 impl Diff {
+    pub fn commit_info(&self) -> &CommitInfo {
+        &self.commit_info
+    }
+
+    pub fn files(&self) -> &[FileDiff] {
+        &self.files
+    }
+
+    pub fn stats(&self) -> &DiffStats {
+        &self.stats
+    }
+
+    /// Create a new Diff for testing purposes
+    ///
+    /// This method is intended for internal testing and documentation examples only.
+    #[doc(hidden)]
+    pub fn new(commit_info: CommitInfo, files: Vec<FileDiff>, stats: DiffStats) -> Self {
+        Self { commit_info, files, stats }
+    }
+
     /// Get files that were added
     ///
     /// # Examples
     ///
     /// ```
+    /// use std::path::PathBuf;
     /// use bloggable::git::diff::{Diff, FileDiff, FileStatus, DiffStats};
+    /// use bloggable::git::commit::CommitInfo;
     ///
-    /// let diff = Diff {
-    ///     files: vec![
-    ///         FileDiff {
-    ///             old_path: None,
-    ///             new_path: Some("new_file.txt".to_string()),
-    ///             status: FileStatus::Added,
-    ///             hunks: vec![],
-    ///         },
-    ///         FileDiff {
-    ///             old_path: Some("old_file.txt".to_string()),
-    ///             new_path: Some("old_file.txt".to_string()),
-    ///             status: FileStatus::Modified,
-    ///             hunks: vec![],
-    ///         },
+    /// let commit_info = CommitInfo::new("abc123".to_string(), "Test commit".to_string());
+    /// let diff = Diff::new(
+    ///     commit_info,
+    ///     vec![
+    ///         FileDiff::new(
+    ///             None,
+    ///             Some(PathBuf::from("new_file.txt")),
+    ///             FileStatus::Added,
+    ///             vec![],
+    ///         ),
+    ///         FileDiff::new(
+    ///             Some(PathBuf::from("old_file.txt")),
+    ///             Some(PathBuf::from("old_file.txt")),
+    ///             FileStatus::Modified,
+    ///             vec![],
+    ///         ),
     ///     ],
-    ///     stats: DiffStats {
-    ///         files_changed: 2,
-    ///         insertions: 5,
-    ///         deletions: 2,
-    ///     },
-    /// };
+    ///     DiffStats::new(2, 5, 2),
+    /// );
     ///
     /// let added_files: Vec<_> = diff.added_files().collect();
     /// assert_eq!(added_files.len(), 1);
-    /// assert_eq!(added_files[0].new_path.as_ref().unwrap(), "new_file.txt");
+    /// assert_eq!(added_files[0].new_path().unwrap(), &PathBuf::from("new_file.txt"));
     /// ```
     pub fn added_files(&self) -> impl Iterator<Item = &FileDiff> {
-        self.files.iter().filter(|f| f.status == FileStatus::Added)
+        self.files.iter().filter(|f| *f.status() == FileStatus::Added)
     }
 
     /// Get files that were deleted
@@ -127,38 +256,38 @@ impl Diff {
     /// # Examples
     ///
     /// ```
+    /// use std::path::PathBuf;
     /// use bloggable::git::diff::{Diff, FileDiff, FileStatus, DiffStats};
+    /// use bloggable::git::commit::CommitInfo;
     ///
-    /// let diff = Diff {
-    ///     files: vec![
-    ///         FileDiff {
-    ///             old_path: Some("deleted_file.txt".to_string()),
-    ///             new_path: None,
-    ///             status: FileStatus::Deleted,
-    ///             hunks: vec![],
-    ///         },
-    ///         FileDiff {
-    ///             old_path: Some("modified_file.txt".to_string()),
-    ///             new_path: Some("modified_file.txt".to_string()),
-    ///             status: FileStatus::Modified,
-    ///             hunks: vec![],
-    ///         },
+    /// let commit_info = CommitInfo::new("def456".to_string(), "Delete files".to_string());
+    /// let diff = Diff::new(
+    ///     commit_info,
+    ///     vec![
+    ///         FileDiff::new(
+    ///             Some(PathBuf::from("deleted_file.txt")),
+    ///             None,
+    ///             FileStatus::Deleted,
+    ///             vec![],
+    ///         ),
+    ///         FileDiff::new(
+    ///             Some(PathBuf::from("modified_file.txt")),
+    ///             Some(PathBuf::from("modified_file.txt")),
+    ///             FileStatus::Modified,
+    ///             vec![],
+    ///         ),
     ///     ],
-    ///     stats: DiffStats {
-    ///         files_changed: 2,
-    ///         insertions: 0,
-    ///         deletions: 10,
-    ///     },
-    /// };
+    ///     DiffStats::new(2, 0, 10),
+    /// );
     ///
     /// let deleted_files: Vec<_> = diff.deleted_files().collect();
     /// assert_eq!(deleted_files.len(), 1);
-    /// assert_eq!(deleted_files[0].old_path.as_ref().unwrap(), "deleted_file.txt");
+    /// assert_eq!(deleted_files[0].old_path().unwrap(), &PathBuf::from("deleted_file.txt"));
     /// ```
     pub fn deleted_files(&self) -> impl Iterator<Item = &FileDiff> {
         self.files
             .iter()
-            .filter(|f| f.status == FileStatus::Deleted)
+            .filter(|f| *f.status() == FileStatus::Deleted)
     }
 
     /// Get files that were modified
@@ -166,115 +295,51 @@ impl Diff {
     /// # Examples
     ///
     /// ```
+    /// use std::path::PathBuf;
     /// use bloggable::git::diff::{Diff, FileDiff, FileStatus, DiffStats};
+    /// use bloggable::git::commit::CommitInfo;
     ///
-    /// let diff = Diff {
-    ///     files: vec![
-    ///         FileDiff {
-    ///             old_path: Some("file1.txt".to_string()),
-    ///             new_path: Some("file1.txt".to_string()),
-    ///             status: FileStatus::Modified,
-    ///             hunks: vec![],
-    ///         },
-    ///         FileDiff {
-    ///             old_path: None,
-    ///             new_path: Some("file2.txt".to_string()),
-    ///             status: FileStatus::Added,
-    ///             hunks: vec![],
-    ///         },
-    ///         FileDiff {
-    ///             old_path: Some("file3.txt".to_string()),
-    ///             new_path: Some("file3.txt".to_string()),
-    ///             status: FileStatus::Modified,
-    ///             hunks: vec![],
-    ///         },
+    /// let commit_info = CommitInfo::new("ghi789".to_string(), "Modify files".to_string());
+    /// let diff = Diff::new(
+    ///     commit_info,
+    ///     vec![
+    ///         FileDiff::new(
+    ///             Some(PathBuf::from("file1.txt")),
+    ///             Some(PathBuf::from("file1.txt")),
+    ///             FileStatus::Modified,
+    ///             vec![],
+    ///         ),
+    ///         FileDiff::new(
+    ///             None,
+    ///             Some(PathBuf::from("file2.txt")),
+    ///             FileStatus::Added,
+    ///             vec![],
+    ///         ),
+    ///         FileDiff::new(
+    ///             Some(PathBuf::from("file3.txt")),
+    ///             Some(PathBuf::from("file3.txt")),
+    ///             FileStatus::Modified,
+    ///             vec![],
+    ///         ),
     ///     ],
-    ///     stats: DiffStats {
-    ///         files_changed: 3,
-    ///         insertions: 15,
-    ///         deletions: 8,
-    ///     },
-    /// };
+    ///     DiffStats::new(3, 15, 8),
+    /// );
     ///
     /// let modified_files: Vec<_> = diff.modified_files().collect();
     /// assert_eq!(modified_files.len(), 2);
-    /// assert_eq!(modified_files[0].new_path.as_ref().unwrap(), "file1.txt");
-    /// assert_eq!(modified_files[1].new_path.as_ref().unwrap(), "file3.txt");
+    /// assert_eq!(modified_files[0].new_path().unwrap(), &PathBuf::from("file1.txt"));
+    /// assert_eq!(modified_files[1].new_path().unwrap(), &PathBuf::from("file3.txt"));
     /// ```
     pub fn modified_files(&self) -> impl Iterator<Item = &FileDiff> {
         self.files
             .iter()
-            .filter(|f| f.status == FileStatus::Modified)
+            .filter(|f| *f.status() == FileStatus::Modified)
     }
 }
 
-/// Convert from git2::Diff to our structured Diff
-///
-/// # Examples
-///
-/// ```
-/// use bloggable::git::diff::Diff;
-/// use std::convert::TryFrom;
-/// use std::fs;
-///
-/// # let dir = tempfile::tempdir().unwrap();
-/// # let repo = git2::Repository::init(dir.path()).unwrap();
-/// # let sig = git2::Signature::now("Test", "test@example.com").unwrap();
-/// #
-/// # // Create initial commit with a file
-/// # fs::write(dir.path().join("file.txt"), "Hello\nWorld\n").unwrap();
-/// # let mut index = repo.index().unwrap();
-/// # index.add_path(std::path::Path::new("file.txt")).unwrap();
-/// # index.write().unwrap();
-/// # let tree_id = index.write_tree().unwrap();
-/// # let tree = repo.find_tree(tree_id).unwrap();
-/// # let first_commit = repo.commit(
-/// #     Some("HEAD"),
-/// #     &sig,
-/// #     &sig,
-/// #     "Initial commit",
-/// #     &tree,
-/// #     &[],
-/// # ).unwrap();
-/// #
-/// # // Modify the file and create a second commit
-/// # fs::write(dir.path().join("file.txt"), "Hello\nWorld\nFoo\n").unwrap();
-/// # index.add_path(std::path::Path::new("file.txt")).unwrap();
-/// # index.write().unwrap();
-/// # let tree_id = index.write_tree().unwrap();
-/// # let tree = repo.find_tree(tree_id).unwrap();
-/// # let first_commit_obj = repo.find_commit(first_commit).unwrap();
-/// # let second_commit = repo.commit(
-/// #     Some("HEAD"),
-/// #     &sig,
-/// #     &sig,
-/// #     "Add foo",
-/// #     &tree,
-/// #     &[&first_commit_obj],
-/// # ).unwrap();
-///
-/// // Create a diff between the two commits
-/// let commit1 = repo.find_commit(first_commit).unwrap();
-/// let commit2 = repo.find_commit(second_commit).unwrap();
-/// let tree1 = commit1.tree().unwrap();
-/// let tree2 = commit2.tree().unwrap();
-///
-/// let git_diff = repo.diff_tree_to_tree(Some(&tree1), Some(&tree2), None)
-///     .expect("Failed to create diff");
-///
-/// let diff = Diff::try_from(git_diff).expect("Failed to parse diff");
-/// assert_eq!(diff.stats.files_changed, 1);
-/// assert_eq!(diff.stats.insertions, 1);
-/// assert_eq!(diff.stats.deletions, 0);
-///
-/// let modified_files: Vec<_> = diff.modified_files().collect();
-/// assert_eq!(modified_files.len(), 1);
-/// assert_eq!(modified_files[0].new_path.as_ref().unwrap(), "file.txt");
-/// ```
-impl<'a> TryFrom<git2::Diff<'a>> for Diff {
-    type Error = DiffError;
-
-    fn try_from(git_diff: git2::Diff<'a>) -> Result<Self, Self::Error> {
+impl Diff {
+    /// Create a Diff from git2::Diff and CommitInfo
+    pub fn from_git_diff(commit_info: CommitInfo, git_diff: git2::Diff<'_>) -> Result<Self, DiffError> {
         let mut files: Vec<FileDiff> = Vec::new();
         // Since git iterates the diff via patches, we need to merge individual patches
         // by file to create our structured representation. Therefore, we need to keep
@@ -293,12 +358,12 @@ impl<'a> TryFrom<git2::Diff<'a>> for Diff {
                     .new_file()
                     .path()
                     .and_then(|p| p.to_str())
-                    .map(String::from);
+                    .map(PathBuf::from);
                 let old_file_path = delta
                     .old_file()
                     .path()
                     .and_then(|p| p.to_str())
-                    .map(String::from);
+                    .map(PathBuf::from);
 
                 // If we have moved on to a new file, save the previous one
                 if let Some(ref mut cf) = current_file {
@@ -462,7 +527,7 @@ impl<'a> TryFrom<git2::Diff<'a>> for Diff {
                 deletions: stats.deletions() as usize,
             })?;
 
-        Ok(Diff { files, stats })
+        Ok(Diff { commit_info, files, stats })
     }
 }
 
@@ -503,6 +568,7 @@ impl<'a> TryFrom<char> for LineType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::commit::CommitInfo;
     use crate::git::tests::common::TestRepo;
     use std::convert::TryFrom;
     use std::fs;
@@ -513,9 +579,9 @@ mod tests {
         let diff = test_repo.create_diff();
 
         // Test that statistics are correctly calculated
-        assert_eq!(diff.stats.files_changed, 3); // main.rs, old_module.rs, new_feature.rs
-        assert!(diff.stats.insertions > 0, "Should have insertions");
-        assert!(diff.stats.deletions > 0, "Should have deletions");
+        assert_eq!(diff.stats().files_changed(), 3); // main.rs, old_module.rs, new_feature.rs
+        assert!(diff.stats().insertions() > 0, "Should have insertions");
+        assert!(diff.stats().deletions() > 0, "Should have deletions");
     }
 
     #[tokio::test]
@@ -525,34 +591,37 @@ mod tests {
 
         let added_files: Vec<_> = diff.added_files().collect();
         assert_eq!(added_files.len(), 1);
-        assert_eq!(added_files[0].new_path.as_ref().unwrap(), "new_feature.rs");
-        assert_eq!(added_files[0].status, FileStatus::Added);
+        assert_eq!(
+            added_files[0].new_path().unwrap(),
+            &PathBuf::from("new_feature.rs")
+        );
+        assert_eq!(*added_files[0].status(), FileStatus::Added);
 
         // Verify the added file has proper content
         let added_file = &added_files[0];
-        assert!(!added_file.hunks.is_empty(), "Added file should have hunks");
+        assert!(!added_file.hunks().is_empty(), "Added file should have hunks");
 
         // Check that we have addition lines in the hunk
-        let hunk = &added_file.hunks[0];
+        let hunk = &added_file.hunks()[0];
         let additions: Vec<_> = hunk
-            .lines
+            .lines()
             .iter()
-            .filter(|l| l.line_type == LineType::Addition)
+            .filter(|l| *l.line_type() == LineType::Addition)
             .collect();
         assert!(!additions.is_empty(), "Should have addition lines");
 
         // Check that we have no deletion lines in the hunk
         let deletions: Vec<_> = hunk
-            .lines
+            .lines()
             .iter()
-            .filter(|l| l.line_type == LineType::Deletion)
+            .filter(|l| *l.line_type() == LineType::Deletion)
             .collect();
         assert!(deletions.is_empty(), "Should have no deletion lines");
 
         // Check for specific content we expect in new_feature.rs
         let has_feature_manager = additions
             .iter()
-            .any(|line| line.content.contains("pub struct FeatureManager"));
+            .any(|line| line.content().contains("pub struct FeatureManager"));
         assert!(
             has_feature_manager,
             "Should contain FeatureManager struct definition"
@@ -566,37 +635,40 @@ mod tests {
 
         let deleted_files: Vec<_> = diff.deleted_files().collect();
         assert_eq!(deleted_files.len(), 1);
-        assert_eq!(deleted_files[0].old_path.as_ref().unwrap(), "old_module.rs");
-        assert_eq!(deleted_files[0].status, FileStatus::Deleted);
+        assert_eq!(
+            deleted_files[0].old_path().unwrap(),
+            &PathBuf::from("old_module.rs")
+        );
+        assert_eq!(*deleted_files[0].status(), FileStatus::Deleted);
 
         // Verify the deleted file has proper content
         let deleted_file = &deleted_files[0];
         assert!(
-            !deleted_file.hunks.is_empty(),
+            !deleted_file.hunks().is_empty(),
             "Deleted file should have hunks"
         );
 
         // Check that we have deletion lines in the hunk
-        let hunk = &deleted_file.hunks[0];
+        let hunk = &deleted_file.hunks()[0];
         let deletions: Vec<_> = hunk
-            .lines
+            .lines()
             .iter()
-            .filter(|l| l.line_type == LineType::Deletion)
+            .filter(|l| *l.line_type() == LineType::Deletion)
             .collect();
         assert!(!deletions.is_empty(), "Should have deletion lines");
 
         // Check that we have no addition lines in the hunk
         let additions: Vec<_> = hunk
-            .lines
+            .lines()
             .iter()
-            .filter(|l| l.line_type == LineType::Addition)
+            .filter(|l| *l.line_type() == LineType::Addition)
             .collect();
         assert!(additions.is_empty(), "Should have no addition lines");
 
         // Check for specific content we expect from old_module.rs
         let has_old_struct = deletions
             .iter()
-            .any(|line| line.content.contains("pub struct OldStruct"));
+            .any(|line| line.content().contains("pub struct OldStruct"));
         assert!(
             has_old_struct,
             "Should contain OldStruct definition from deleted file"
@@ -610,35 +682,41 @@ mod tests {
 
         let modified_files: Vec<_> = diff.modified_files().collect();
         assert_eq!(modified_files.len(), 1);
-        assert_eq!(modified_files[0].new_path.as_ref().unwrap(), "main.rs");
-        assert_eq!(modified_files[0].old_path.as_ref().unwrap(), "main.rs");
-        assert_eq!(modified_files[0].status, FileStatus::Modified);
+        assert_eq!(
+            modified_files[0].new_path().unwrap(),
+            &PathBuf::from("main.rs")
+        );
+        assert_eq!(
+            modified_files[0].old_path().unwrap(),
+            &PathBuf::from("main.rs")
+        );
+        assert_eq!(*modified_files[0].status(), FileStatus::Modified);
 
         // Test that hunks are properly parsed
         let modified_file = &modified_files[0];
         assert!(
-            !modified_file.hunks.is_empty(),
+            !modified_file.hunks().is_empty(),
             "Modified file should have hunks"
         );
 
         // Collect all lines across all hunks to verify we have the expected changes
         let all_additions: Vec<_> = modified_file
-            .hunks
+            .hunks()
             .iter()
-            .flat_map(|h| &h.lines)
-            .filter(|l| l.line_type == LineType::Addition)
+            .flat_map(|h| h.lines())
+            .filter(|l| *l.line_type() == LineType::Addition)
             .collect();
         let all_deletions: Vec<_> = modified_file
-            .hunks
+            .hunks()
             .iter()
-            .flat_map(|h| &h.lines)
-            .filter(|l| l.line_type == LineType::Deletion)
+            .flat_map(|h| h.lines())
+            .filter(|l| *l.line_type() == LineType::Deletion)
             .collect();
         let all_context: Vec<_> = modified_file
-            .hunks
+            .hunks()
             .iter()
-            .flat_map(|h| &h.lines)
-            .filter(|l| l.line_type == LineType::Context)
+            .flat_map(|h| h.lines())
+            .filter(|l| *l.line_type() == LineType::Context)
             .collect();
 
         assert!(
@@ -655,20 +733,20 @@ mod tests {
         );
 
         // Verify line numbers are correctly assigned across all hunks
-        for hunk in &modified_file.hunks {
-            for line in &hunk.lines {
-                match line.line_type {
+        for hunk in modified_file.hunks() {
+            for line in hunk.lines() {
+                match *line.line_type() {
                     LineType::Addition => {
-                        assert!(line.new_line_number.is_some());
-                        assert!(line.old_line_number.is_none());
+                        assert!(line.new_line_number().is_some());
+                        assert!(line.old_line_number().is_none());
                     }
                     LineType::Deletion => {
-                        assert!(line.old_line_number.is_some());
-                        assert!(line.new_line_number.is_none());
+                        assert!(line.old_line_number().is_some());
+                        assert!(line.new_line_number().is_none());
                     }
                     LineType::Context => {
-                        assert!(line.old_line_number.is_some());
-                        assert!(line.new_line_number.is_some());
+                        assert!(line.old_line_number().is_some());
+                        assert!(line.new_line_number().is_some());
                     }
                     LineType::Other => {}
                 }
@@ -678,7 +756,7 @@ mod tests {
         // Test specific changes we expect between main_v1.rs and main_v2.rs
         let has_stats_addition = all_additions
             .iter()
-            .any(|line| line.content.contains("stats: ProcessingStats"));
+            .any(|line| line.content().contains("stats: ProcessingStats"));
         assert!(
             has_stats_addition,
             "Should add stats field to DataProcessor"
@@ -686,10 +764,10 @@ mod tests {
 
         let has_case_change = all_deletions
             .iter()
-            .any(|line| line.content.contains("to_uppercase"))
+            .any(|line| line.content().contains("to_uppercase"))
             && all_additions
                 .iter()
-                .any(|line| line.content.contains("to_lowercase"));
+                .any(|line| line.content().contains("to_lowercase"));
         assert!(
             has_case_change,
             "Should change from to_uppercase to to_lowercase"
@@ -708,13 +786,13 @@ mod tests {
 
         // Check that hunks have meaningful headers from Rust context
         // The first hunk may not have context if it starts at the top of the file
-        modified_file.hunks.iter().skip(1).for_each(|hunk| {
+        modified_file.hunks().iter().skip(1).for_each(|hunk| {
             assert!(
-                hunk.header.contains("fn")
-                    || hunk.header.contains("impl")
-                    || hunk.header.contains("struct"),
+                hunk.header().contains("fn")
+                    || hunk.header().contains("impl")
+                    || hunk.header().contains("struct"),
                 "Hunk header should contain Rust context like function or struct names: {}",
-                hunk.header
+                hunk.header()
             )
         });
     }
@@ -741,12 +819,13 @@ mod tests {
         let git_diff = repo
             .diff_tree_to_tree(Some(&tree), Some(&tree), None)
             .unwrap();
-        let diff = Diff::try_from(git_diff).expect("Should handle empty diff");
+        let commit_info = CommitInfo::new("test123".to_string(), "Test commit".to_string());
+        let diff = Diff::from_git_diff(commit_info, git_diff).expect("Should handle empty diff");
 
-        assert_eq!(diff.files.len(), 0);
-        assert_eq!(diff.stats.files_changed, 0);
-        assert_eq!(diff.stats.insertions, 0);
-        assert_eq!(diff.stats.deletions, 0);
+        assert_eq!(diff.files().len(), 0);
+        assert_eq!(diff.stats().files_changed(), 0);
+        assert_eq!(diff.stats().insertions(), 0);
+        assert_eq!(diff.stats().deletions(), 0);
 
         assert_eq!(diff.added_files().count(), 0);
         assert_eq!(diff.deleted_files().count(), 0);

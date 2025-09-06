@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use tracing::debug;
 
-use crate::git::commit::{Commit, CommitInfo};
+use crate::git::commit::CommitInfo;
 use crate::git::diff::Diff;
 
 /// Alias for Result type used throughout the repository module.
@@ -89,12 +89,13 @@ impl Repository {
         })
     }
 
-    /// Resolve a commit-ish reference to a `Commit` object.
+    /// Resolve a commit-ish reference to a `CommitInfo` object.
     /// The input can be any valid Git reference (branch names, tags, OIDs, etc.).
-    /// If the commit is found, it is returned as a `Commit` object.
+    /// If the commit is found, it is returned as a `CommitInfo` object.
     /// Otherwise, an error is returned.
-    /// The ID of the `Commit` object will be a string that uniquely identifies the commit-ish item,
-    /// such as a OID hash for local commits or a SHA for GitHub commits.
+    ///
+    /// The ID of the `CommitInfo` object will be a string that uniquely identifies the
+    /// commit-ish item, such as a commit hash, tag name, or branch name.
     ///
     /// # Examples
     ///
@@ -160,7 +161,7 @@ impl Repository {
     ///     assert!(repo.resolve_commit("nonexistent").await.is_err());
     /// # });
     /// ```
-    pub async fn resolve_commit(&self, commit: &str) -> RepositoryResult<Commit> {
+    pub async fn resolve_commit(&self, commit: &str) -> RepositoryResult<CommitInfo> {
         match self {
             Repository::Local { repo, .. } => {
                 // First, resolve the commit-ish to an object
@@ -189,14 +190,7 @@ impl Repository {
                     RepositoryError::Internal(format!("Commit conversion error: {}", e))
                 })?;
 
-                // Generate a diff for the commit
-                let diff = self.generate_diff(&commit_info).map_err(|e| {
-                    RepositoryError::Internal(format!("Diff generation error: {}", e))
-                })?;
-
-                debug!("Generated diff for commit '{}'", commit_info.id());
-
-                Ok(Commit::new(commit_info, diff))
+                Ok(commit_info)
             }
         }
     }
@@ -210,7 +204,7 @@ impl Repository {
     /// ```
     /// # tokio_test::block_on(async {
     /// # use bloggable::git::repository::Repository;
-    /// # use bloggable::git::commit::{Commit, CommitInfo};
+    /// # use bloggable::git::commit::CommitInfo;
     /// # use bloggable::git::diff::Diff;
     /// # use std::path::PathBuf;
     /// # let dir = tempfile::tempdir().unwrap();
@@ -236,14 +230,8 @@ impl Repository {
     /// # ).unwrap();
     /// #
     /// let repo = Repository::try_local(git.path().into()).await.unwrap();
-    /// let ancestor = Commit::new(
-    ///     CommitInfo::try_from(git.find_commit(first_commit).unwrap()).unwrap(),
-    ///     Diff::default(),
-    /// );
-    /// let descendant = Commit::new(
-    ///     CommitInfo::try_from(git.find_commit(second_commit).unwrap()).unwrap(),
-    ///     Diff::default(),
-    /// );
+    /// let ancestor = CommitInfo::try_from(git.find_commit(first_commit).unwrap()).unwrap();
+    /// let descendant = CommitInfo::try_from(git.find_commit(second_commit).unwrap()).unwrap();
     ///
     /// let is_ancestor = repo.is_ancestor(&ancestor, &descendant).await.unwrap();
     /// assert!(is_ancestor); // first_commit is ancestor of second_commit
@@ -254,7 +242,7 @@ impl Repository {
     /// ```
     /// # tokio_test::block_on(async {
     /// # use bloggable::git::repository::Repository;
-    /// # use bloggable::git::commit::{Commit, CommitInfo};
+    /// # use bloggable::git::commit::CommitInfo;
     /// # use bloggable::git::diff::Diff;
     /// # use std::path::PathBuf;
     /// # let dir = tempfile::tempdir().unwrap();
@@ -280,37 +268,31 @@ impl Repository {
     /// # ).unwrap();
     /// #
     /// let repo = Repository::try_local(git.path().into()).await.unwrap();
-    /// let ancestor = Commit::new(
-    ///     CommitInfo::try_from(git.find_commit(first_commit).unwrap()).unwrap(),
-    ///     Diff::default(),
-    /// );
-    /// let descendant = Commit::new(
-    ///     CommitInfo::try_from(git.find_commit(second_commit).unwrap()).unwrap(),
-    ///     Diff::default(),
-    /// );
+    /// let ancestor = CommitInfo::try_from(git.find_commit(first_commit).unwrap()).unwrap();
+    /// let descendant = CommitInfo::try_from(git.find_commit(second_commit).unwrap()).unwrap();
     ///
     /// // Reverse check: descendant is NOT ancestor of ancestor
-    /// let is_reverse = repo.is_ancestor(&descendant, &ancestor).await.unwrap();
-    /// assert!(!is_reverse);
+    /// let is_ancestor = repo.is_ancestor(&descendant, &ancestor).await.unwrap();
+    /// assert!(!is_ancestor);
     /// # });
     /// ```
     pub async fn is_ancestor(
         &self,
-        ancestor: &Commit,
-        descendant: &Commit,
+        ancestor: &CommitInfo,
+        descendant: &CommitInfo,
     ) -> RepositoryResult<bool> {
         match self {
             Repository::Local { repo, .. } => {
-                let ancestor_oid = git2::Oid::from_str(ancestor.info().id()).map_err(|_| {
+                let ancestor_oid = git2::Oid::from_str(ancestor.id()).map_err(|_| {
                     RepositoryError::InvalidCommittish {
-                        committish: ancestor.info().id().into(),
+                        committish: ancestor.id().into(),
                         reason: "Invalid commit-ish format".into(),
                     }
                 })?;
 
-                let descendant_oid = git2::Oid::from_str(descendant.info().id()).map_err(|_| {
+                let descendant_oid = git2::Oid::from_str(descendant.id()).map_err(|_| {
                     RepositoryError::InvalidCommittish {
-                        committish: descendant.info().id().into(),
+                        committish: descendant.id().into(),
                         reason: "Invalid commit-ish format".into(),
                     }
                 })?;
@@ -320,19 +302,208 @@ impl Repository {
         }
     }
 
+    /// Walk the commit history from `from` to `to`, returning all commits in between.
+    /// The direction of the walk is from `from` to `to`, meaning that `from` should be an ancestor of `to`.
+    /// The `from` commit will not be included in the returned list.
+    /// If a commit is not found, an internal error will be returned.
+    ///
+    /// # Examples
+    ///
+    /// Walking commits in a range A..C where A --> B --> C:
+    /// ```
+    /// # tokio_test::block_on(async {
+    /// # use bloggable::git::repository::Repository;
+    /// # use bloggable::git::commit::CommitInfo;
+    /// # let dir = tempfile::tempdir().unwrap();
+    /// # let git = git2::Repository::init(dir.path()).unwrap();
+    /// # let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+    /// # let tree_id = git.treebuilder(None).unwrap().write().unwrap();
+    /// # let tree = git.find_tree(tree_id).unwrap();
+    /// # let first_commit = git.commit(
+    /// #     Some("HEAD"),
+    /// #     &sig,
+    /// #     &sig,
+    /// #     "Initial commit",
+    /// #     &tree,
+    /// #     &[],
+    /// # ).unwrap();
+    /// # let second_commit = git.commit(
+    /// #     Some("HEAD"),
+    /// #     &sig,
+    /// #     &sig,
+    /// #     "Second commit",
+    /// #     &tree,
+    /// #     &[&git.find_commit(first_commit).unwrap()],
+    /// # ).unwrap();
+    /// # let third_commit = git.commit(
+    /// #     Some("HEAD"),
+    /// #     &sig,
+    /// #     &sig,
+    /// #     "Third commit",
+    /// #     &tree,
+    /// #     &[&git.find_commit(second_commit).unwrap()],
+    /// # ).unwrap();
+    /// let repo = Repository::try_local(git.path().into()).await.unwrap();
+    /// let from = CommitInfo::try_from(git.find_commit(first_commit).unwrap()).unwrap();
+    /// let to = CommitInfo::try_from(git.find_commit(third_commit).unwrap()).unwrap();
+    /// let commits = repo.walk_range(&from, &to).await.unwrap();
+    /// assert_eq!(commits.len(), 2);
+    /// assert_eq!(commits[0].id(), second_commit.to_string());
+    /// assert_eq!(commits[1].id(), third_commit.to_string());
+    /// # });
+    /// ```
+    ///
+    /// Walking commits in a range A..C where A --> C:
+    /// ```
+    /// # tokio_test::block_on(async {
+    /// # use bloggable::git::repository::Repository;
+    /// # use bloggable::git::commit::CommitInfo;
+    /// # let dir = tempfile::tempdir().unwrap();
+    /// # let git = git2::Repository::init(dir.path()).unwrap();
+    /// # let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+    /// # let tree_id = git.treebuilder(None).unwrap().write().unwrap();
+    /// # let tree = git.find_tree(tree_id).unwrap();
+    /// # let first_commit = git.commit(
+    /// #     Some("HEAD"),
+    /// #     &sig,
+    /// #     &sig,
+    /// #     "Initial commit",
+    /// #     &tree,
+    /// #     &[],
+    /// # ).unwrap();
+    /// # let second_commit = git.commit(
+    /// #     Some("HEAD"),
+    /// #     &sig,
+    /// #     &sig,
+    /// #     "Second commit",
+    /// #     &tree,
+    /// #     &[&git.find_commit(first_commit).unwrap()],
+    /// # ).unwrap();
+    /// let repo = Repository::try_local(git.path().into()).await.unwrap();
+    /// let from = CommitInfo::try_from(git.find_commit(first_commit).unwrap()).unwrap();
+    /// let to = CommitInfo::try_from(git.find_commit(second_commit).unwrap()).unwrap();
+    /// let commits = repo.walk_range(&from, &to).await.unwrap();
+    /// assert_eq!(commits.len(), 1);
+    /// assert_eq!(commits[0].id(), second_commit.to_string());
+    /// # });
+    /// ```
+    ///
+    /// Walking commits in a range C..A where A --> C:
+    /// ```
+    /// # tokio_test::block_on(async {
+    /// # use bloggable::git::repository::Repository;
+    /// # use bloggable::git::commit::CommitInfo;
+    /// # let dir = tempfile::tempdir().unwrap();
+    /// # let git = git2::Repository::init(dir.path()).unwrap();
+    /// # let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+    /// # let tree_id = git.treebuilder(None).unwrap().write().unwrap();
+    /// # let tree = git.find_tree(tree_id).unwrap();
+    /// # let first_commit = git.commit(
+    /// #     Some("HEAD"),
+    /// #     &sig,
+    /// #     &sig,
+    /// #     "Initial commit",
+    /// #     &tree,
+    /// #     &[],
+    /// # ).unwrap();
+    /// # let second_commit = git.commit(
+    /// #     Some("HEAD"),
+    /// #     &sig,
+    /// #     &sig,
+    /// #     "Second commit",
+    /// #     &tree,
+    /// #     &[&git.find_commit(first_commit).unwrap()],
+    /// # ).unwrap();
+    /// let repo = Repository::try_local(git.path().into()).await.unwrap();
+    /// let from = CommitInfo::try_from(git.find_commit(second_commit).unwrap()).unwrap();
+    /// let to = CommitInfo::try_from(git.find_commit(first_commit).unwrap()).unwrap();
+    /// let commits = repo.walk_range(&from, &to).await.unwrap();
+    /// assert_eq!(commits.len(), 0);
+    /// # });
+    /// ```
+    pub async fn walk_range(
+        &self,
+        from: &CommitInfo,
+        to: &CommitInfo,
+    ) -> RepositoryResult<Vec<CommitInfo>> {
+        match self {
+            Repository::Local { repo, .. } => {
+                let mut revwalk = repo.revwalk()?;
+                let from_oid = git2::Oid::from_str(from.id())?;
+
+                let to_oid = git2::Oid::from_str(to.id())?;
+
+                // Mark the 'to' commit as the start of the walk
+                revwalk.push(to_oid)?;
+
+                // Mark the 'from' commit as hidden, or the end of the walk
+                revwalk.hide(from_oid)?;
+
+                // Set the revwalk order to walk from 'from' to 'to'
+                revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)?;
+
+                let mut commits = Vec::new();
+                for oid_result in revwalk {
+                    let oid = oid_result?;
+                    let commit = repo.find_commit(oid)?;
+                    let commit_info = CommitInfo::try_from(commit).map_err(|e| {
+                        RepositoryError::Internal(format!("Commit conversion error: {}", e))
+                    })?;
+                    commits.push(commit_info);
+                }
+
+                Ok(commits)
+            }
+        }
+    }
+
     /// Generate a diff for a given commit.
     /// If the commit has no parents (e.g., initial commit), the diff is against an empty tree.
-    fn generate_diff(&self, commit: &CommitInfo) -> RepositoryResult<Diff> {
+    ///
+    /// # Examples
+    /// ```
+    /// # tokio_test::block_on(async {
+    /// # use bloggable::git::repository::Repository;
+    /// # use bloggable::git::commit::CommitInfo;
+    /// # use bloggable::git::diff::Diff;
+    /// # use std::path::PathBuf;
+    /// # use std::fs;
+    /// # let dir = tempfile::tempdir().unwrap();
+    /// # let git = git2::Repository::init(dir.path()).unwrap();
+    /// # let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+    /// # fs::write(dir.path().join("new_file.txt"), "Hello\nWorld\n").unwrap();
+    /// # let mut index = git.index().unwrap();
+    /// # index.add_path(std::path::Path::new("new_file.txt")).unwrap();
+    /// # index.write().unwrap();
+    /// # let tree_id = index.write_tree().unwrap();
+    /// # let tree = git.find_tree(tree_id).unwrap();
+    /// # let commit = git.commit(
+    /// #     Some("HEAD"),
+    /// #     &sig,
+    /// #     &sig,
+    /// #     "Initial commit",
+    /// #     &tree,
+    /// #     &[],
+    /// # ).unwrap();
+    /// let commit = CommitInfo::try_from(git.find_commit(commit).unwrap()).unwrap();
+    /// let repo = Repository::try_local(dir.path().into()).await.unwrap();
+    /// let diff = repo.generate_diff(&commit).await;
+    /// assert!(diff.is_ok());
+    /// assert!(diff.unwrap().added_files().next().is_some_and(|f| f.new_path() == Some(&"new_file.txt".into())));
+    /// # })
+    /// ```
+    pub async fn generate_diff(&self, commit: &CommitInfo) -> RepositoryResult<Diff> {
         match self {
             Repository::Local { repo, .. } => {
                 // Re-fetch the commit and get trees
                 let oid = git2::Oid::from_str(commit.id())?;
-                let commit = repo.find_commit(oid)?;
-                let commit_tree = commit.tree()?;
+                let git_commit = repo.find_commit(oid)?;
+                let commit_tree = git_commit.tree()?;
 
-                // Get parent tree if it exists
-                let parent_tree = if commit.parent_count() > 0 {
-                    Some(commit.parent(0)?.tree()?)
+                // TODO: Consider handling multi-parent commits more gracefully.
+                // For now, we'll just use the first parent.
+                let parent_tree = if git_commit.parent_count() > 0 {
+                    Some(git_commit.parent(0)?.tree()?)
                 } else {
                     None
                 };
@@ -342,7 +513,7 @@ impl Repository {
                     repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), None)?;
 
                 // Convert to our structured Diff type
-                let diff = Diff::try_from(git_diff).map_err(|e| {
+                let diff = Diff::from_git_diff(commit.clone(), git_diff).map_err(|e| {
                     RepositoryError::Internal(format!(
                         "Failed to parse diff for commit '{}': {}",
                         commit.id(),
@@ -360,6 +531,20 @@ impl Repository {
 mod tests {
     use super::*;
     use crate::git::tests::common::TestRepo;
+
+    #[tokio::test]
+    async fn test_open_local_repository() {
+        let test_repo = TestRepo::new().await;
+        let repo_path = test_repo._temp_dir.path().to_path_buf();
+        let repo = Repository::try_local(repo_path).await;
+        assert!(repo.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_open_nonexistent_repository() {
+        let repo = Repository::try_local(PathBuf::from("/path/to/nonexistent/repo")).await;
+        assert!(repo.is_err());
+    }
 
     #[tokio::test]
     async fn test_resolve_commit_by_hash() {
@@ -387,6 +572,19 @@ mod tests {
         // HEAD~1 should resolve to the first commit
         let commit = test_repo.repo.resolve_commit("HEAD~1").await.unwrap();
         assert_eq!(commit.id(), test_repo.first_commit_id());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_commit_by_tag() {
+        let test_repo = TestRepo::new().await;
+
+        // v1.0 should resolve to the first commit
+        let commit = test_repo.repo.resolve_commit("v1.0").await.unwrap();
+        assert_eq!(commit.id(), test_repo.first_commit_id());
+
+        // v2.0 should resolve to the second commit
+        let commit = test_repo.repo.resolve_commit("v2.0").await.unwrap();
+        assert_eq!(commit.id(), test_repo.second_commit_id());
     }
 
     #[tokio::test]
@@ -446,62 +644,181 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_commit_includes_diff() {
+    async fn test_walk_range_distant_commits() {
         let test_repo = TestRepo::new().await;
 
-        // Resolve the second commit and verify it includes the expected diff
-        let commit = test_repo
-            .repo
-            .resolve_commit(&test_repo.second_commit_id())
-            .await
-            .unwrap();
-        let diff = commit.diff();
-
-        // Should have the expected file changes
-        assert_eq!(diff.stats.files_changed, 3); // main.rs, old_module.rs, new_feature.rs
-        assert!(diff.stats.insertions > 0);
-        assert!(diff.stats.deletions > 0);
-
-        // Check specific file changes
-        let added_files: Vec<_> = diff.added_files().collect();
-        assert_eq!(added_files.len(), 1);
-        assert_eq!(added_files[0].new_path.as_ref().unwrap(), "new_feature.rs");
-
-        let deleted_files: Vec<_> = diff.deleted_files().collect();
-        assert_eq!(deleted_files.len(), 1);
-        assert_eq!(deleted_files[0].old_path.as_ref().unwrap(), "old_module.rs");
-
-        let modified_files: Vec<_> = diff.modified_files().collect();
-        assert_eq!(modified_files.len(), 1);
-        assert_eq!(modified_files[0].new_path.as_ref().unwrap(), "main.rs");
-    }
-
-    #[tokio::test]
-    async fn test_initial_commit_diff() {
-        let test_repo = TestRepo::new().await;
-
-        // The first commit should have a diff against empty tree
-        let commit = test_repo
+        let first_commit = test_repo
             .repo
             .resolve_commit(&test_repo.first_commit_id())
             .await
             .unwrap();
-        let diff = commit.diff();
+        let second_commit = test_repo
+            .repo
+            .resolve_commit(&test_repo.second_commit_id())
+            .await
+            .unwrap();
+
+        let third_commit_id = test_repo.add_commit(
+            "Third Commit",
+            "sweet_was_the_walk.txt",
+            "Sweet was the walk along the narrow lane",
+        );
+
+        let third_commit = test_repo
+            .repo
+            .resolve_commit(&third_commit_id.to_string())
+            .await
+            .unwrap();
+
+        let commits = test_repo
+            .repo
+            .walk_range(&first_commit, &third_commit)
+            .await
+            .unwrap();
+
+        // The `from` commit should not be included, leaving
+        // us with the second and third commits.
+        assert_eq!(commits.len(), 2);
+        assert_eq!(commits[0].id(), second_commit.id());
+        assert_eq!(commits[1].id(), third_commit.id());
+    }
+
+    #[tokio::test]
+    async fn test_walk_range_adjacent_commits() {
+        let test_repo = TestRepo::new().await;
+
+        let first_commit = test_repo
+            .repo
+            .resolve_commit(&test_repo.first_commit_id())
+            .await
+            .unwrap();
+        let second_commit = test_repo
+            .repo
+            .resolve_commit(&test_repo.second_commit_id())
+            .await
+            .unwrap();
+
+        let commits = test_repo
+            .repo
+            .walk_range(&first_commit, &second_commit)
+            .await
+            .unwrap();
+
+        // Again, the `from` commit should not be included
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].id(), second_commit.id());
+    }
+
+    #[tokio::test]
+    async fn test_walk_range_misordered() {
+        let test_repo = TestRepo::new().await;
+
+        let first_commit = test_repo
+            .repo
+            .resolve_commit(&test_repo.first_commit_id())
+            .await
+            .unwrap();
+        let second_commit = test_repo
+            .repo
+            .resolve_commit(&test_repo.second_commit_id())
+            .await
+            .unwrap();
+
+        let commits = test_repo
+            .repo
+            .walk_range(&second_commit, &first_commit)
+            .await
+            .unwrap();
+
+        // Range A..B means "all commits reachable from B but not from A."
+        // If B is a child of A, then no commits should match this definition.
+        assert_eq!(commits.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_walk_range_same_commit() {
+        let test_repo = TestRepo::new().await;
+
+        let first_commit = test_repo
+            .repo
+            .resolve_commit(&test_repo.first_commit_id())
+            .await
+            .unwrap();
+
+        let commits = test_repo
+            .repo
+            .walk_range(&first_commit, &first_commit)
+            .await
+            .unwrap();
+
+        // A commit should not be considered in the range to itself
+        assert_eq!(commits.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_generate_diff_between_commits() {
+        let test_repo = TestRepo::new().await;
+
+        let second_commit = CommitInfo::new(
+            test_repo.second_commit_id(),
+            "Second commit with changes".to_string(),
+        );
+
+        // Generate the diff of the second commit
+        let diff = test_repo.repo.generate_diff(&second_commit).await.unwrap();
+
+        // Should have the expected file changes
+        assert_eq!(diff.stats().files_changed(), 3); // main.rs, old_module.rs, new_feature.rs
+        assert!(diff.stats().insertions() > 0);
+        assert!(diff.stats().deletions() > 0);
+
+        // Check specific file changes
+        let added_files: Vec<_> = diff.added_files().collect();
+        assert_eq!(added_files.len(), 1);
+        assert_eq!(
+            added_files[0].new_path().unwrap(),
+            &PathBuf::from("new_feature.rs")
+        );
+
+        let deleted_files: Vec<_> = diff.deleted_files().collect();
+        assert_eq!(deleted_files.len(), 1);
+        assert_eq!(
+            deleted_files[0].old_path().unwrap(),
+            &PathBuf::from("old_module.rs")
+        );
+
+        let modified_files: Vec<_> = diff.modified_files().collect();
+        assert_eq!(modified_files.len(), 1);
+        assert_eq!(
+            modified_files[0].new_path().unwrap(),
+            &PathBuf::from("main.rs")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_generate_diff_initial_commit() {
+        let test_repo = TestRepo::new().await;
+
+        let first_commit =
+            CommitInfo::new(test_repo.first_commit_id(), "Initial commit".to_string());
+
+        // The first commit should have a diff against empty tree
+        let diff = test_repo.repo.generate_diff(&first_commit).await.unwrap();
 
         // All files in initial commit should appear as additions
-        assert_eq!(diff.stats.files_changed, 3); // main.rs, utils.rs, old_module.rs
-        assert_eq!(diff.stats.deletions, 0); // No deletions in initial commit
-        assert!(diff.stats.insertions > 0);
+        assert_eq!(diff.stats().files_changed(), 3); // main.rs, utils.rs, old_module.rs
+        assert_eq!(diff.stats().deletions(), 0); // No deletions in initial commit
+        assert!(diff.stats().insertions() > 0);
 
         let added_files: Vec<_> = diff.added_files().collect();
         assert_eq!(added_files.len(), 3);
 
         let file_names: Vec<_> = added_files
             .iter()
-            .map(|f| f.new_path.as_ref().unwrap().as_str())
+            .map(|f| f.new_path().unwrap().to_str())
             .collect();
-        assert!(file_names.contains(&"main.rs"));
-        assert!(file_names.contains(&"utils.rs"));
-        assert!(file_names.contains(&"old_module.rs"));
+        assert!(file_names.contains(&Some("main.rs")));
+        assert!(file_names.contains(&Some("utils.rs")));
+        assert!(file_names.contains(&Some("old_module.rs")));
     }
 }

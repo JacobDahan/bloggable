@@ -1,50 +1,9 @@
 use tracing::error;
 
-use crate::git::diff::Diff;
-
 #[derive(Debug, thiserror::Error)]
 pub enum CommitError {
-    #[error("Failed to convert git2::Commit to Commit")]
+    #[error("Failed to convert git2::Commit to CommitInfo")]
     Git2ConversionError,
-}
-
-/// Representation of a Git [commit][1].
-///
-/// The `Commit` struct may represent commits or references from different sources,
-/// such as local repositories or remote services like GitHub.
-///
-/// The `Commit` struct encapsulates essential information about a Git commit,
-/// including its ID, message, and diff.
-///
-/// The ID is a string that uniquely identifies the commit object.
-///
-/// [1]: http://git-scm.com/book/en/Git-Internals-Git-Objects
-#[derive(Debug, Clone)]
-pub struct Commit {
-    info: CommitInfo,
-    diff: Diff,
-}
-
-impl Commit {
-    /// Create a new `Commit` instance.
-    pub fn new(info: CommitInfo, diff: Diff) -> Self {
-        Commit { info, diff }
-    }
-
-    /// Get the commit metadata.
-    pub fn info(&self) -> &CommitInfo {
-        &self.info
-    }
-
-    /// Get the structured diff of the commit.
-    pub fn diff(&self) -> &Diff {
-        &self.diff
-    }
-
-    /// Get the commit ID (convenience method).
-    pub fn id(&self) -> &str {
-        self.info.id()
-    }
 }
 
 /// Metadata about a Git commit.
@@ -55,6 +14,11 @@ pub struct CommitInfo {
 }
 
 impl CommitInfo {
+    /// Create a new CommitInfo instance.
+    pub fn new(id: String, message: String) -> Self {
+        CommitInfo { id, message }
+    }
+
     /// Get the commit ID.
     pub fn id(&self) -> &str {
         &self.id
@@ -109,13 +73,18 @@ impl TryFrom<git2::Commit<'_>> for CommitInfo {
     }
 }
 
-/// Specification of commits to process.
+/// Specification for commits to process.
 ///
-/// This enum represents different ways to specify commits,
-/// including a single commit, multiple commits, or a range of commits.
+/// This enum separates commit identification from diff generation,
+/// allowing for proper range handling and lazy diff computation.
+/// It supports single commits, multiple commits, and commit ranges.
 #[derive(Debug)]
 pub enum CommitSpec {
-    Single(Commit),
-    Multiple(Vec<Commit>),
-    Range { from: Commit, to: Commit },
+    /// A single commit identified by its metadata
+    Single(CommitInfo),
+    /// Multiple explicitly specified commits
+    Multiple(Vec<CommitInfo>),
+    /// A range of commits from one point to another (e.g., "A..B")
+    /// The actual commits in the range are computed lazily during diff generation
+    Range { from: CommitInfo, to: CommitInfo },
 }

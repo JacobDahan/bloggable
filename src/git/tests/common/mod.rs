@@ -1,6 +1,7 @@
 use std::fs;
 use tempfile::TempDir;
 
+use crate::git::commit::CommitInfo;
 use crate::git::diff::Diff;
 use crate::git::repository::Repository;
 
@@ -158,7 +159,13 @@ impl TestRepo {
             .diff_tree_to_tree(Some(&tree1), Some(&tree2), None)
             .expect("Failed to create git diff");
 
-        Diff::try_from(git_diff).expect("Failed to convert git2::Diff to Diff")
+        // Create CommitInfo for the second commit (the one we're diffing to)
+        let commit_info = CommitInfo::new(
+            self.second_commit_id.to_string(),
+            commit2.message().unwrap_or("").to_string(),
+        );
+
+        Diff::from_git_diff(commit_info, git_diff).expect("Failed to convert git2::Diff to Diff")
     }
 
     /// Get the first commit ID as a string

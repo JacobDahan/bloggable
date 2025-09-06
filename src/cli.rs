@@ -31,14 +31,17 @@ pub async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             // Next, parse the commit range
             let commit_spec = parser.parse_commits(&commits).await?;
 
-            // At this point, we have a valid repository and a list of commits to process,
+            // ... and generate diffs for the parsed commits
+            let diffs = parser.generate_diffs(commit_spec).await?;
+
+            debug!("Generated {} diffs for processing", diffs.len());
+
+            // At this point, we have a valid repository and a list of diffs to process,
             // so we have effectively completed all of the logic that is owned by the CLI module.
 
             // Now, hand off to the core logic to generate the blog post.
             debug!("--------------- TODO: Hand off to core logic ---------------");
 
-            // TODO: Extract relevant information from the parsed commits
-            // TODO: Parse the repository to generate a repository map
             Ok(())
         }
         Some(commands::Command::Init { .. }) => {
